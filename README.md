@@ -12,6 +12,19 @@
 - **Optional SHA256 verification** from a digest or checksum file.
 
 ## Installation
+### windows install
+# Download the prebuilt binary
+curl -L -o kdownload.zip https://github.com/compiledkernel-idk/kdownload/releases/download/v0.1.0/kdownload-0.1.0-windows-x86_64.zip
+
+# Extract to $HOME\bin (create if it doesn’t exist)
+Expand-Archive kdownload.zip -DestinationPath "$HOME\bin" -Force
+
+# Add $HOME\bin to PATH (permanent)
+setx PATH "$($env:PATH);$HOME\bin"
+
+# Restart PowerShell, then test
+kdownload --help
+
 
 ### Build from source
 ```bash
