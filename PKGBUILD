@@ -1,3 +1,5 @@
+# Maintainer: Berk Kapla <berkkapla82@proton.me>
+
 pkgname=kdownload
 pkgver=0.1.0
 pkgrel=1
