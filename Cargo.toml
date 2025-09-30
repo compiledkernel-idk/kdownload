@@ -1,0 +1,28 @@
+[package]
+name = "kdownload"
+version = "0.1.0"
+edition = "2021"
+authors = ["kdownload contributors"]
+description = "Blazing-fast command-line downloader for Linux"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/kdownload/kdownload"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+log = "0.4"
+env_logger = "0.11"
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "io-util", "time", "sync"] }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "stream"] }
+nix = { version = "0.27", default-features = false, features = ["fs"] }
+url = "2"
+thiserror = "1"
+futures-util = "0.3"
+
+[dev-dependencies]
+assert_cmd = "2"
