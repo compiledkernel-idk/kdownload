@@ -12,19 +12,60 @@
 - **Optional SHA256 verification** from a digest or checksum file.
 
 ## Installation
-### windows install
-# Download the prebuilt binary
-curl -L -o kdownload.zip https://github.com/compiledkernel-idk/kdownload/releases/download/v0.1.0/kdownload-0.1.0-windows-x86_64.zip
 
-# Extract to $HOME\bin (create if it doesn’t exist)
-Expand-Archive kdownload.zip -DestinationPath "$HOME\bin" -Force
+#  Installation
 
-# Add $HOME\bin to PATH (permanent)
-setx PATH "$($env:PATH);$HOME\bin"
+Prebuilt binaries are available on the [Releases page](https://github.com/compiledkernel-idk/kdownload/releases).
 
-# Restart PowerShell, then test
+---
+
+## Linux (x86_64)
+
+Download the prebuilt binary:
+```bash
+curl -L -o kdownload.tar.gz https://github.com/compiledkernel-idk/kdownload/releases/download/v0.1.0/kdownload-0.1.0-linux-x86_64.tar.gz
+```
+
+Extract:
+```bash
+tar -xvf kdownload.tar.gz
+```
+
+Move into PATH (requires sudo):
+```bash
+sudo mv kdownload /usr/local/bin/
+```
+
+Test:
+```bash
 kdownload --help
+```
 
+---
+
+## Windows (x86_64)
+
+Open **PowerShell** and run:
+
+Download the prebuilt binary:
+```powershell
+curl -L -o kdownload.zip https://github.com/compiledkernel-idk/kdownload/releases/download/v0.1.0/kdownload-0.1.0-windows-x86_64.zip
+```
+
+Extract to `$HOME\bin` (create if it doesn’t exist):
+```powershell
+Expand-Archive kdownload.zip -DestinationPath "$HOME\bin" -Force
+```
+
+Add `$HOME\bin` to PATH (permanent):
+```powershell
+setx PATH "$($env:PATH);$HOME\bin"
+```
+
+Restart PowerShell, then test:
+```powershell
+kdownload --help
+```
 
 ### Build from source
 ```bash
