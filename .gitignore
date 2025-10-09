@@ -1,0 +1,8 @@
+/dist/
+/pkg/
+/src/kdownload*/
+/src/*.tar.gz
+/src/target/
+/target/
+/*.pkg.tar.*
+/*.src.tar.gz
