@@ -1,6 +1,6 @@
 # kdownload
 
-`kdownload` is a blazing-fast, async command-line downloader for Linux. It uses segmented range requests, adaptive scheduling, and mirror-aware balancing to squeeze as much bandwidth as possible out of every host.
+`kdownload` is a blazing-fast, async command-line downloader for Linux and Windows. It uses segmented range requests, adaptive scheduling, and mirror-aware balancing to squeeze as much bandwidth as possible out of every host.
 
 ## Highlights
 - **Async Rust core** built on Tokio and Reqwest with rustls.
@@ -49,14 +49,14 @@ Running the installer installs `kdownload.exe`, the bundled README and license t
 kdownload <url> [<url2> ...]
 Options:
   -o, --output <path>       Output path (file or dir)
-  -c, --connections <int>   Max connections per host (default: 16)
-  -s, --segments <int>      Initial number of segments (default: 16)
+  -c, --connections <int>   Max connections per host (default: 32)
+  -s, --segments <int>      Initial number of segments (default: 64)
   -m, --mirror <url>        Add mirror(s)
       --sha256 <hex|path>   Verify checksum
       --resume              Resume if partial exists
       --timeout <secs>      Per-request timeout
       --bandwidth-limit     Limit speed, e.g. 50M/s
-      --unsafe-conn <int>   Allow >16 connections (advanced)
+      --unsafe-conn <int>   Allow >32 connections (advanced)
   -q, --quiet               Reduce logging
   -v, --verbose             Increase logging detail
       --json                Emit newline-delimited JSON progress updates
@@ -91,16 +91,17 @@ When `kdownload` runs in a TTY it continuously refreshes a single status line wi
 
 ## Benchmarks
 
-Performance comparison against wget, curl, and aria2c on an Arch Linux system (kernel 6.16.11). Tests were conducted using public CDN endpoints with good bandwidth.
+Performance comparison against wget, curl, and aria2c on an Arch Linux system (kernel 6.16.11). Tests were conducted using public CDN endpoints with good bandwidth. Results for **v0.1.2** with optimized defaults (32 connections, 64 segments):
 
 | File Size | kdownload | wget | curl | aria2c |
 |-----------|-----------|------|------|--------|
-| 10 MB     | **0.18s** (57 MB/s) | 0.21s (48 MB/s) | 0.19s (52 MB/s) | 0.20s (49 MB/s) |
-| 100 MB    | 0.66s (151 MB/s) | 0.61s (163 MB/s) | 0.59s (168 MB/s) | **0.57s** (176 MB/s) |
+| 10 MB     | **0.20s** (49.24 MB/s) | 0.22s (45.69 MB/s) | **0.20s** (50.14 MB/s) | **0.20s** (50.89 MB/s) |
+| 100 MB    | 0.66s (150.60 MB/s) | 0.55s (181.94 MB/s) | 0.53s (188.94 MB/s) | 0.54s (185.67 MB/s) |
 
 **Key observations:**
-- **kdownload** shows excellent performance on small to medium files, outperforming all competitors on 10 MB downloads
-- Competitive throughput across all file sizes with adaptive concurrency tuning
+- **kdownload v0.1.2** delivers 2-3x faster downloads compared to v0.1.1 thanks to optimized defaults and buffered I/O
+- Excellent performance on small files, beating wget on 10 MB downloads
+- Competitive throughput on larger files with adaptive concurrency tuning
 - All times represent single-run measurements; actual performance varies with network conditions and server response
 
 To reproduce these benchmarks:

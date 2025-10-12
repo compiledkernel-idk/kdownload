@@ -1,9 +1,9 @@
 [package]
 name = "kdownload"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["kdownload contributors"]
-description = "Blazing-fast command-line downloader for Linux"
+description = "Blazing-fast async segmented file downloader"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/kdownload/kdownload"
