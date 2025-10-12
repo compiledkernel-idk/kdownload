@@ -1,6 +1,6 @@
 [package]
 name = "kdownload"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["kdownload contributors"]
 description = "Blazing-fast command-line downloader for Linux"
