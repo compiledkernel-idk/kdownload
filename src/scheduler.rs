@@ -82,10 +82,10 @@ impl Scheduler {
                 last_adjustment: Instant::now(),
             }),
             max_parallelism: max_parallelism.max(1),
-            throughput_window: 24,
-            scale_up_threshold: 8_000_000.0, // ~8 MiB/s per connection
-            scale_down_threshold: 200_000.0, // ~200 KiB/s per connection
-            adjustment_interval: Duration::from_secs(2),
+            throughput_window: 16,
+            scale_up_threshold: 5_000_000.0, // ~5 MiB/s per connection (more aggressive)
+            scale_down_threshold: 100_000.0, // ~100 KiB/s per connection
+            adjustment_interval: Duration::from_millis(1500), // Faster adjustment
         }
     }
 
@@ -127,8 +127,10 @@ impl Scheduler {
         let active = state.target_parallelism.max(1) as f64;
         let per_conn = avg_speed / active;
 
+        // More aggressive scaling: add 2 connections at a time when fast, scale down slower
         if per_conn > self.scale_up_threshold && state.target_parallelism < self.max_parallelism {
-            state.target_parallelism += 1;
+            let increase = (self.max_parallelism - state.target_parallelism).min(2);
+            state.target_parallelism += increase;
         } else if per_conn < self.scale_down_threshold && state.target_parallelism > 1 {
             state.target_parallelism -= 1;
         }

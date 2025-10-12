@@ -31,8 +31,9 @@ use nix::fcntl::{fallocate, FallocateFlags};
 #[cfg(target_os = "linux")]
 use std::os::unix::io::AsRawFd;
 
-const MIN_CHUNK_SIZE: u64 = 1 << 20; // 1 MiB
+const MIN_CHUNK_SIZE: u64 = 4 << 20; // 4 MiB (increased from 1 MiB)
 const MAX_RETRIES: usize = 5;
+const WRITE_BUFFER_SIZE: usize = 512 << 10; // 512 KiB write buffer
 
 pub struct DownloadManager {
     config: DownloadConfig,
@@ -57,7 +58,13 @@ impl DownloadManager {
         let mirrors = MirrorPool::new(config.urls.clone());
         let mut builder = Client::builder()
             .user_agent("kdownload/0.1")
-            .redirect(reqwest::redirect::Policy::limited(10));
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .pool_max_idle_per_host(config.max_connections_per_host)
+            .pool_idle_timeout(Some(std::time::Duration::from_secs(90)))
+            .tcp_nodelay(true)
+            .http2_adaptive_window(true)
+            .http2_keep_alive_interval(Some(std::time::Duration::from_secs(10)))
+            .http2_keep_alive_timeout(std::time::Duration::from_secs(20));
         if let Some(timeout) = config.timeout {
             builder = builder.timeout(timeout);
         }
@@ -622,6 +629,8 @@ async fn download_segment_once(
 
     let mut downloaded = segment_state.downloaded;
     let mut total_downloaded = 0u64;
+    let mut write_buffer = Vec::with_capacity(WRITE_BUFFER_SIZE);
+    let mut buffer_position = position;
 
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
@@ -629,14 +638,25 @@ async fn download_segment_once(
         if let Some(limiter) = &bandwidth {
             limiter.consume(chunk.len()).await;
         }
-        write_all_at(&file, chunk.as_ref(), position)?;
+
+        // Buffer writes to reduce syscalls
+        write_buffer.extend_from_slice(&chunk);
+
+        if write_buffer.len() >= WRITE_BUFFER_SIZE {
+            write_all_at(&file, &write_buffer, buffer_position)?;
+            buffer_position += write_buffer.len() as u64;
+            write_buffer.clear();
+        }
+
         position += chunk.len() as u64;
         downloaded += chunk.len() as u64;
         total_downloaded += chunk.len() as u64;
-        partmap
-            .record_progress(segment.id, downloaded, false)
-            .await?;
         progress.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+    }
+
+    // Flush remaining buffered data
+    if !write_buffer.is_empty() {
+        write_all_at(&file, &write_buffer, buffer_position)?;
     }
 
     let completed = downloaded >= segment.len();

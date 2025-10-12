@@ -26,7 +26,7 @@ pub struct Cli {
         short = 'c',
         long = "connections",
         value_name = "int",
-        default_value_t = 16
+        default_value_t = 32
     )]
     pub connections: usize,
 
@@ -35,7 +35,7 @@ pub struct Cli {
         short = 's',
         long = "segments",
         value_name = "int",
-        default_value_t = 16
+        default_value_t = 64
     )]
     pub segments: usize,
 
@@ -59,7 +59,7 @@ pub struct Cli {
     #[arg(long = "bandwidth-limit", value_name = "rate")]
     pub bandwidth_limit: Option<String>,
 
-    /// Allow more than 16 connections (advanced)
+    /// Allow more than 32 connections (advanced)
     #[arg(long = "unsafe-conn", value_name = "int")]
     pub unsafe_conn: Option<usize>,
 
@@ -99,11 +99,11 @@ impl TryFrom<Cli> for DownloadConfig {
             all_urls.push(parsed);
         }
 
-        let allow_unsafe = cli.unsafe_conn.unwrap_or(16);
+        let allow_unsafe = cli.unsafe_conn.unwrap_or(64);
         let max_per_host = if cli.unsafe_conn.is_some() {
             cli.connections.max(1)
         } else {
-            cli.connections.min(16).max(1)
+            cli.connections.min(64).max(1)
         };
         if cli.unsafe_conn.is_some() && cli.connections > allow_unsafe {
             return Err(anyhow!(
