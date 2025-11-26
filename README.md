@@ -24,11 +24,18 @@ make install PREFIX=/usr/local
 The Makefile supplies `build`, `install`, and `test` targets and honours the common `PREFIX`/`DESTDIR` conventions.
 
 ### Arch Linux (AUR)
-The repository ships a `PKGBUILD` ready for the AUR. To try it locally:
+You can either ```makepkg``` it manually or download it with an AUR helper
 ```bash
-makepkg -si
+yay -S kdownload
 ```
-Publishing to the AUR only requires uploading the `PKGBUILD`, `.SRCINFO`, and supporting files.
+or
+
+```bash
+paru -S kdownload
+```
+
+add **-bin** if you don't want to compile it from source
+
 
 ### Prebuilt binaries
 Each tagged release ships ready-to-run archives for Linux (`kdownload-<ver>-linux-x86_64.tar.gz`) and Windows (`kdownload-<ver>-windows-x86_64.zip`).
