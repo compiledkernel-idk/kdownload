@@ -1,4 +1,6 @@
-use std::io::{IsTerminal, Write};
+use colored::*;
+use indicatif::{ProgressBar, ProgressStyle};
+use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -10,9 +12,8 @@ use tokio::time::{interval, MissedTickBehavior};
 
 use crate::download::ProgressMode;
 use crate::scheduler::Scheduler;
-use crate::util::format_bytes;
 
-const PROGRESS_TICK: Duration = Duration::from_millis(250);
+const PROGRESS_TICK: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, Copy)]
 pub enum ProgressFinish {
@@ -69,18 +70,8 @@ impl ProgressReporter {
         let handle = tokio::spawn(async move {
             let mut ticker = interval(PROGRESS_TICK);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-            let mut renderer = TextRenderer::new();
+            let mut renderer = TextRenderer::new(total_bytes);
             let start = Instant::now();
-
-            let initial_snapshot = build_snapshot(
-                total_bytes,
-                initial_downloaded,
-                start,
-                &progress,
-                scheduler.as_ref(),
-            )
-            .await;
-            renderer.render(&initial_snapshot, None);
 
             loop {
                 tokio::select! {
@@ -128,16 +119,6 @@ impl ProgressReporter {
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let mut renderer = JsonRenderer::new();
             let start = Instant::now();
-
-            let initial_snapshot = build_snapshot(
-                total_bytes,
-                initial_downloaded,
-                start,
-                &progress,
-                scheduler.as_ref(),
-            )
-            .await;
-            renderer.render(&initial_snapshot, JsonRenderKind::Progress);
 
             loop {
                 tokio::select! {
@@ -193,14 +174,6 @@ struct ProgressSnapshot {
 }
 
 impl ProgressSnapshot {
-    fn percent(&self) -> Option<f64> {
-        let total = self.total?;
-        if total == 0 {
-            return Some(100.0);
-        }
-        Some((self.downloaded as f64 / total as f64 * 100.0).min(100.0))
-    }
-
     fn throughput(&self) -> f64 {
         let elapsed = self.elapsed.as_secs_f64();
         if elapsed <= f64::EPSILON {
@@ -235,85 +208,32 @@ async fn build_snapshot(
 }
 
 struct TextRenderer {
-    is_tty: bool,
-    last_line_len: usize,
-    last_log: Option<Instant>,
-    last_line: Option<String>,
+    progress_bar: ProgressBar,
 }
 
 impl TextRenderer {
-    fn new() -> Self {
-        let is_tty = std::io::stderr().is_terminal();
-        Self {
-            is_tty,
-            last_line_len: 0,
-            last_log: None,
-            last_line: None,
-        }
+    fn new(total_bytes: Option<u64>) -> Self {
+        let pb = ProgressBar::new(total_bytes.unwrap_or(0));
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+        Self { progress_bar: pb }
     }
 
     fn render(&mut self, snapshot: &ProgressSnapshot, finish: Option<ProgressFinish>) {
-        let mut parts = Vec::new();
-        if let Some(total) = snapshot.total {
-            parts.push(format!(
-                "{} / {}",
-                format_bytes(snapshot.downloaded),
-                format_bytes(total)
-            ));
-        } else {
-            parts.push(format!("{} downloaded", format_bytes(snapshot.downloaded)));
-        }
-
-        if let Some(percent) = snapshot.percent() {
-            parts.push(format!("{percent:5.1}%"));
-        }
-
-        let throughput = snapshot.throughput();
-        if throughput > 0.0 {
-            let rate = format_bytes(throughput.round() as u64);
-            parts.push(format!("{rate}/s"));
-        }
-
-        if let Some(active) = snapshot.segments_active {
-            parts.push(format!("active:{}", active));
-        }
-        if let Some(pending) = snapshot.segments_pending {
-            parts.push(format!("pending:{}", pending));
-        }
-        if let Some(target) = snapshot.target_parallelism {
-            parts.push(format!("target:{}", target));
-        }
-
-        let line = parts.join(" • ");
-        if self.is_tty {
-            let mut to_print = line.clone();
-            if self.last_line_len > line.len() {
-                let padding = " ".repeat(self.last_line_len - line.len());
-                to_print.push_str(&padding);
-            }
-            eprint!("\r{}", to_print);
-            let _ = std::io::stderr().flush();
-            self.last_line_len = line.len();
-            if finish.is_some() {
-                eprintln!();
-            }
-        } else {
-            let now = Instant::now();
-            let is_new_line = self.last_line.as_ref().map_or(true, |prev| prev != &line);
-            let should_emit = finish.is_some()
-                || is_new_line
-                || self.last_log.map_or(true, |prev| {
-                    now.duration_since(prev) >= Duration::from_secs(1)
-                });
-            if should_emit {
-                println!("{}", line);
-                let _ = std::io::stdout().flush();
-                self.last_log = Some(now);
-                self.last_line = Some(line);
+        self.progress_bar.set_position(snapshot.downloaded);
+        if let Some(finish) = finish {
+            match finish {
+                ProgressFinish::Success => self.progress_bar.finish_with_message("Download complete".green().to_string()),
+                ProgressFinish::Failure => self.progress_bar.finish_with_message("Download failed".red().to_string()),
             }
         }
     }
 }
+
 
 struct JsonRenderer;
 
@@ -372,7 +292,7 @@ impl JsonProgressEvent {
             .unwrap_or_default()
             .as_millis();
         let elapsed_ms = snapshot.elapsed.as_millis();
-        let fraction = snapshot.percent().map(|p| p / 100.0);
+        let fraction = snapshot.total.map(|total| if total > 0 { snapshot.downloaded as f64 / total as f64 } else { 1.0 });
         let bytes_per_second = snapshot.throughput();
 
         JsonProgressEvent {

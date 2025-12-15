@@ -23,6 +23,8 @@ nix = { version = "0.27", default-features = false, features = ["fs"] }
 url = "2"
 thiserror = "1"
 futures-util = "0.3"
+indicatif = "0.17"
+colored = "2"
 
 [dev-dependencies]
 assert_cmd = "2"

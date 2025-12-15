@@ -1,0 +1,12 @@
+Package: kdownload
+Version: 0.1.2
+Section: net
+Priority: optional
+Architecture: amd64
+Maintainer: Jules <jules@example.com>
+Description: Blazing-fast async segmented file downloader
+ Kdownload is a blazing-fast, async command-line downloader for Linux.
+ It uses segmented range requests, adaptive scheduling, and mirror-aware
+ balancing to squeeze as much bandwidth as possible out of every host.
+Homepage: https://github.com/kdownload/kdownload
+Depends: libc6 (>= 2.35)
