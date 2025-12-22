@@ -192,7 +192,7 @@ async fn build_snapshot(
 ) -> ProgressSnapshot {
     let downloaded = progress.load(Ordering::Relaxed);
     let scheduler_snapshot = match scheduler {
-        Some(s) => Some(s.snapshot().await),
+        Some(s) => Some(s.snapshot()),
         None => None,
     };
 

@@ -1,12 +1,10 @@
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use tokio::fs;
+use tokio::fs::{self, File, OpenOptions};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
-
-const FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PartSegment {
@@ -73,10 +71,15 @@ impl PartMap {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct SegmentUpdate {
+    id: usize,
+    downloaded: u64,
+}
+
 struct PartMapState {
     map: PartMap,
-    dirty: bool,
-    last_flush: Instant,
+    file: File,
 }
 
 pub struct PartMapHandle {
@@ -87,39 +90,73 @@ pub struct PartMapHandle {
 impl PartMapHandle {
     pub async fn load_or_create(path: PathBuf, file_size: u64, chunk_size: u64) -> Result<Self> {
         if path.exists() {
-            let bytes = fs::read(&path)
+            let mut file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&path)
                 .await
-                .with_context(|| format!("failed to read part map {:?}", path))?;
-            let map: PartMap = serde_json::from_slice(&bytes)
-                .with_context(|| format!("invalid part map format in {:?}", path))?;
-            if map.file_size != file_size {
-                return Err(anyhow!(
-                    "part map file size mismatch (expected {}, found {})",
-                    file_size,
-                    map.file_size
-                ));
+                .with_context(|| format!("failed to open part map {:?}", path))?;
+
+            let mut data = Vec::new();
+            file.read_to_end(&mut data).await?;
+
+            if !data.is_empty() {
+                // Try to deserialize the base map
+                let mut offset = 0;
+                match bincode::deserialize::<PartMap>(&data) {
+                    Ok(mut map) => {
+                        offset += bincode::serialized_size(&map)? as usize;
+                        
+                        // Check if valid
+                        if map.file_size == file_size {
+                             // Replay updates
+                             while offset < data.len() {
+                                 match bincode::deserialize::<SegmentUpdate>(&data[offset..]) {
+                                     Ok(update) => {
+                                         if let Some(seg) = map.segments.get_mut(update.id) {
+                                             seg.downloaded = update.downloaded;
+                                         }
+                                         offset += bincode::serialized_size(&update)? as usize;
+                                     }
+                                     Err(_) => break, // Stop on partial/corrupt update
+                                 }
+                             }
+                             
+                             // Re-open in append mode
+                             let file = OpenOptions::new()
+                                .append(true)
+                                .open(&path)
+                                .await?;
+
+                             return Ok(Self {
+                                 path,
+                                 state: Mutex::new(PartMapState { map, file }),
+                             });
+                        }
+                    }
+                    Err(_) => {
+                        // Invalid format, ignore and overwrite
+                    }
+                }
             }
-            return Ok(Self {
-                path,
-                state: Mutex::new(PartMapState {
-                    map,
-                    dirty: false,
-                    last_flush: Instant::now(),
-                }),
-            });
         }
 
+        // Create new
         let map = PartMap::new(file_size, chunk_size);
-        let handle = Self {
-            path: path.clone(),
-            state: Mutex::new(PartMapState {
-                map,
-                dirty: true,
-                last_flush: Instant::now(),
-            }),
-        };
-        handle.persist().await?;
-        Ok(handle)
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)
+            .await?;
+        
+        let bytes = bincode::serialize(&map)?;
+        file.write_all(&bytes).await?;
+
+        Ok(Self {
+            path,
+            state: Mutex::new(PartMapState { map, file }),
+        })
     }
 
     pub async fn segments(&self) -> Vec<PartSegment> {
@@ -130,7 +167,7 @@ impl PartMapHandle {
         &self,
         id: usize,
         downloaded: u64,
-        force_flush: bool,
+        _force_flush: bool,
     ) -> Result<()> {
         let mut state = self.state.lock().await;
         let segment = state
@@ -139,37 +176,24 @@ impl PartMapHandle {
             .iter_mut()
             .find(|seg| seg.id == id)
             .ok_or_else(|| anyhow!("segment {id} not found in part map"))?;
+        
         segment.downloaded = downloaded.min(segment.len());
-        state.dirty = true;
-
-        let should_flush = force_flush || state.last_flush.elapsed() >= FLUSH_INTERVAL;
-        if should_flush {
-            Self::flush_locked(&self.path, &mut state).await?;
-        }
+        
+        let update = SegmentUpdate {
+            id,
+            downloaded: segment.downloaded,
+        };
+        let bytes = bincode::serialize(&update)?;
+        state.file.write_all(&bytes).await?;
+        
+        // We rely on OS buffering and occasional syncs by the user or OS.
+        // If we want durability, we could sync_data periodically, but speed is priority here.
         Ok(())
     }
 
     pub async fn segment(&self, id: usize) -> Option<PartSegment> {
         let state = self.state.lock().await;
         state.map.segments.iter().find(|seg| seg.id == id).cloned()
-    }
-
-    pub async fn persist(&self) -> Result<()> {
-        let mut state = self.state.lock().await;
-        Self::flush_locked(&self.path, &mut state).await
-    }
-
-    async fn flush_locked(path: &PathBuf, state: &mut PartMapState) -> Result<()> {
-        if !state.dirty {
-            return Ok(());
-        }
-        let serialized = serde_json::to_vec_pretty(&state.map)?;
-        fs::write(path, serialized)
-            .await
-            .with_context(|| format!("failed to write part map {:?}", path))?;
-        state.dirty = false;
-        state.last_flush = Instant::now();
-        Ok(())
     }
 
     pub async fn finalize(&self) -> Result<()> {

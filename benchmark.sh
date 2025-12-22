@@ -16,9 +16,8 @@ TEMP_DIR="/tmp/kdownload_bench_$$"
 
 # Test files from public CDNs with good bandwidth
 declare -A TEST_FILES=(
-    ["10MB"]="https://proof.ovh.net/files/10Mb.dat"
-    ["100MB"]="https://proof.ovh.net/files/100Mb.dat"
-    ["1GB"]="https://proof.ovh.net/files/1Gb.dat"
+    ["10MB"]="http://speedtest.tele2.net/10MB.zip"
+    ["100MB"]="http://speedtest.tele2.net/100MB.zip"
 )
 
 # Create directories
@@ -46,24 +45,18 @@ HAVE_WGET=0
 if command -v wget &> /dev/null; then
     echo -e "${GREEN}✓${NC} wget is available"
     HAVE_WGET=1
-else
-    echo -e "${YELLOW}⚠${NC} wget is not available (skipping)"
 fi
 
 HAVE_CURL=0
 if command -v curl &> /dev/null; then
     echo -e "${GREEN}✓${NC} curl is available"
     HAVE_CURL=1
-else
-    echo -e "${YELLOW}⚠${NC} curl is not available (skipping)"
 fi
 
 HAVE_ARIA2=0
 if command -v aria2c &> /dev/null; then
     echo -e "${GREEN}✓${NC} aria2c is available"
     HAVE_ARIA2=1
-else
-    echo -e "${YELLOW}⚠${NC} aria2c is not available (skipping)"
 fi
 echo ""
 
@@ -74,13 +67,10 @@ benchmark() {
     local size_label="$3"
     local output_file="$TEMP_DIR/output_${size_label}"
 
-    echo -e "${BLUE}Testing: $size_label file${NC}"
+    echo -e "${BLUE}Testing: $size_label MB file${NC}"
 
     # Clean up
     rm -f "$output_file"*
-
-    # Measure time with GNU time if available, otherwise use built-in time
-    local time_cmd="command time -f '%e %M' 2>&1"
 
     # kdownload
     echo -n "  kdownload:  "
@@ -89,19 +79,19 @@ benchmark() {
     $KDOWNLOAD -q "$url" -o "$output_file" 2>&1 > /dev/null || true
     local end=$(date +%s.%N)
     local kdownload_time=$(echo "$end - $start" | bc)
-    local kdownload_speed=$(echo "scale=2; $size_label / $kdownload_time" | bc 2>/dev/null || echo "N/A")
-    echo -e "${GREEN}${kdownload_time}s${NC} ($(printf "%.2f" $(echo "$kdownload_speed" | bc 2>/dev/null || echo 0)) MB/s)"
+    local kdownload_speed=$(echo "scale=2; $size_label / $kdownload_time" | bc 2>/dev/null || echo "0")
+    echo -e "${GREEN}${kdownload_time}s${NC} ($(printf "%.2f" $kdownload_speed) MB/s)"
 
     # wget
     if [ "$HAVE_WGET" = "1" ]; then
         echo -n "  wget:       "
         rm -f "$output_file"
         local start=$(date +%s.%N)
-        wget -q "$url" -O "$output_file" 2>&1 > /dev/null || true
+        wget -q --timeout=30 --tries=2 "$url" -O "$output_file" 2>&1 > /dev/null || true
         local end=$(date +%s.%N)
         local wget_time=$(echo "$end - $start" | bc)
-        local wget_speed=$(echo "scale=2; $size_label / $wget_time" | bc 2>/dev/null || echo "N/A")
-        echo -e "${GREEN}${wget_time}s${NC} ($(printf "%.2f" $(echo "$wget_speed" | bc 2>/dev/null || echo 0)) MB/s)"
+        local wget_speed=$(echo "scale=2; $size_label / $wget_time" | bc 2>/dev/null || echo "0")
+        echo -e "${GREEN}${wget_time}s${NC} ($(printf "%.2f" $wget_speed) MB/s)"
     fi
 
     # curl
@@ -109,11 +99,11 @@ benchmark() {
         echo -n "  curl:       "
         rm -f "$output_file"
         local start=$(date +%s.%N)
-        curl -s "$url" -o "$output_file" 2>&1 > /dev/null || true
+        curl -s --max-time 120 "$url" -o "$output_file" 2>&1 > /dev/null || true
         local end=$(date +%s.%N)
         local curl_time=$(echo "$end - $start" | bc)
-        local curl_speed=$(echo "scale=2; $size_label / $curl_time" | bc 2>/dev/null || echo "N/A")
-        echo -e "${GREEN}${curl_time}s${NC} ($(printf "%.2f" $(echo "$curl_speed" | bc 2>/dev/null || echo 0)) MB/s)"
+        local curl_speed=$(echo "scale=2; $size_label / $curl_time" | bc 2>/dev/null || echo "0")
+        echo -e "${GREEN}${curl_time}s${NC} ($(printf "%.2f" $curl_speed) MB/s)"
     fi
 
     # aria2c
@@ -121,11 +111,11 @@ benchmark() {
         echo -n "  aria2c:     "
         rm -f "$output_file"
         local start=$(date +%s.%N)
-        aria2c -q --dir="$TEMP_DIR" --out="output_${size_label}" "$url" 2>&1 > /dev/null || true
+        aria2c -q --timeout=30 --connect-timeout=30 --dir="$TEMP_DIR" --out="output_${size_label}" "$url" 2>&1 > /dev/null || true
         local end=$(date +%s.%N)
         local aria2_time=$(echo "$end - $start" | bc)
-        local aria2_speed=$(echo "scale=2; $size_label / $aria2_time" | bc 2>/dev/null || echo "N/A")
-        echo -e "${GREEN}${aria2_time}s${NC} ($(printf "%.2f" $(echo "$aria2_speed" | bc 2>/dev/null || echo 0)) MB/s)"
+        local aria2_speed=$(echo "scale=2; $size_label / $aria2_time" | bc 2>/dev/null || echo "0")
+        echo -e "${GREEN}${aria2_time}s${NC} ($(printf "%.2f" $aria2_speed) MB/s)"
     fi
 
     echo ""
@@ -140,12 +130,9 @@ echo "File Size,kdownload (s),wget (s),curl (s),aria2c (s)" > "$BENCHMARK_DIR/re
 # Run benchmarks
 for size in "10MB" "100MB"; do
     if [ -n "${TEST_FILES[$size]}" ]; then
-        # Convert size to numeric (remove MB/GB suffix)
-        size_numeric=$(echo "$size" | sed 's/MB$//' | sed 's/GB$//')
-        [ "${size: -2}" = "GB" ] && size_numeric=$(echo "$size_numeric * 1024" | bc)
-
+        size_numeric=$(echo "$size" | sed 's/MB$//')
         benchmark "test_$size" "${TEST_FILES[$size]}" "$size_numeric"
-        sleep 2  # Cool down between tests
+        sleep 1
     fi
 done
 

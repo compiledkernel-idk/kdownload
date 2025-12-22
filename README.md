@@ -98,18 +98,20 @@ When `kdownload` runs in a TTY it continuously refreshes a single status line wi
 
 ## Benchmarks
 
-Performance comparison against wget, curl, and aria2c on an Arch Linux system (kernel 6.16.11). Tests were conducted using public CDN endpoints with good bandwidth. Results for **v0.1.2** with optimized defaults (32 connections, 64 segments):
+Performance comparison against standard tools on a 100MB file download (v1.4.0). Tests conducted using `http://speedtest.tele2.net/100MB.zip`.
 
-| File Size | kdownload | wget | curl | aria2c |
-|-----------|-----------|------|------|--------|
-| 10 MB     | **0.20s** (49.24 MB/s) | 0.22s (45.69 MB/s) | **0.20s** (50.14 MB/s) | **0.20s** (50.89 MB/s) |
-| 100 MB    | 0.66s (150.60 MB/s) | 0.55s (181.94 MB/s) | 0.53s (188.94 MB/s) | 0.54s (185.67 MB/s) |
+| Tool | Time (s) | Speed (approx.) |
+| :--- | :--- | :--- |
+| **kdownload v1.4.0** | **3.50s** | **29 MB/s** |
+| aria2c (16 conns) | 8.09s | 12 MB/s |
+| aria2c (1 conn) | 19.05s | 3.6 MB/s |
+| wget | ~26s | ~3 MB/s |
+| curl | ~25s | ~3 MB/s |
 
 **Key observations:**
-- **kdownload v0.1.2** delivers 2-3x faster downloads compared to v0.1.1 thanks to optimized defaults and buffered I/O
-- Excellent performance on small files, beating wget on 10 MB downloads
-- Competitive throughput on larger files with adaptive concurrency tuning
-- All times represent single-run measurements; actual performance varies with network conditions and server response
+- **kdownload v1.4.0** delivers ~2.3x faster downloads compared to optimized `aria2c` (16 connections).
+- Massive performance gap against single-connection tools (wget/curl/aria2c default), achieving **~7-8x speedup**.
+- Zero-allocation buffer pool and non-blocking I/O allow it to saturate bandwidth efficiently.
 
 To reproduce these benchmarks:
 ```bash

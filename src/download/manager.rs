@@ -18,7 +18,7 @@ use std::os::unix::fs::FileExt;
 use std::os::windows::fs::FileExt as WindowsFileExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tokio::fs as async_fs;
 use tokio::task::JoinSet;
@@ -31,9 +31,35 @@ use nix::fcntl::{fallocate, FallocateFlags};
 #[cfg(target_os = "linux")]
 use std::os::unix::io::AsRawFd;
 
-const MIN_CHUNK_SIZE: u64 = 4 << 20; // 4 MiB (increased from 1 MiB)
+const MIN_CHUNK_SIZE: u64 = 4 << 20; // 4 MiB
 const MAX_RETRIES: usize = 5;
-const WRITE_BUFFER_SIZE: usize = 512 << 10; // 512 KiB write buffer
+const WRITE_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB write buffer
+
+#[derive(Clone)]
+struct BufferPool {
+    pool: Arc<StdMutex<Vec<Vec<u8>>>>,
+}
+
+impl BufferPool {
+    fn new() -> Self {
+        Self {
+            pool: Arc::new(StdMutex::new(Vec::new())),
+        }
+    }
+
+    fn get(&self) -> Vec<u8> {
+        let mut pool = self.pool.lock().unwrap();
+        pool.pop().unwrap_or_else(|| Vec::with_capacity(WRITE_BUFFER_SIZE))
+    }
+
+    fn recycle(&self, mut buf: Vec<u8>) {
+        if buf.capacity() >= WRITE_BUFFER_SIZE {
+            buf.clear();
+            let mut pool = self.pool.lock().unwrap();
+            pool.push(buf);
+        }
+    }
+}
 
 pub struct DownloadManager {
     config: DownloadConfig,
@@ -57,7 +83,7 @@ impl DownloadManager {
     pub fn new(config: DownloadConfig) -> Result<Self> {
         let mirrors = MirrorPool::new(config.urls.clone());
         let mut builder = Client::builder()
-            .user_agent("kdownload/0.1")
+            .user_agent("kdownload/1.4")
             .redirect(reqwest::redirect::Policy::limited(10))
             .pool_max_idle_per_host(config.max_connections_per_host)
             .pool_idle_timeout(Some(std::time::Duration::from_secs(90)))
@@ -268,16 +294,18 @@ impl DownloadManager {
         let client = self.client.clone();
         let mirrors = self.mirrors.clone();
         let bandwidth = self.bandwidth.clone();
+        let buffer_pool = BufferPool::new();
         let mut join_set: JoinSet<SegmentOutcome> = JoinSet::new();
 
-        while scheduler.has_remaining().await {
-            while let Some(segment) = scheduler.next_segment().await {
+        while scheduler.has_remaining() {
+            while let Some(segment) = scheduler.next_segment() {
                 let client = client.clone();
                 let mirrors = mirrors.clone();
                 let file = file.clone();
                 let partmap = partmap.clone();
                 let bandwidth = bandwidth.clone();
                 let progress = progress.clone();
+                let pool = buffer_pool.clone();
                 join_set.spawn(async move {
                     match download_segment_with_retry(
                         client,
@@ -287,6 +315,7 @@ impl DownloadManager {
                         bandwidth,
                         progress,
                         segment.clone(),
+                        pool,
                     )
                     .await
                     {
@@ -301,7 +330,7 @@ impl DownloadManager {
                     let segment_id = stats.id;
                     let segment_bytes = stats.bytes;
                     let segment_duration = stats.duration;
-                    scheduler.on_segment_complete(stats).await;
+                    scheduler.on_segment_complete(stats);
                     debug!(
                         "segment {segment_id} completed: {} in {:?}",
                         format_bytes(segment_bytes),
@@ -323,7 +352,7 @@ impl DownloadManager {
         while let Some(res) = join_set.join_next().await {
             match res {
                 Ok(SegmentOutcome::Completed(stats)) => {
-                    scheduler.on_segment_complete(stats).await;
+                    scheduler.on_segment_complete(stats);
                 }
                 Ok(SegmentOutcome::Failed(err)) => {
                     Self::finalize_progress(&mut progress_display, ProgressFinish::Failure).await;
@@ -551,6 +580,7 @@ async fn download_segment_with_retry(
     bandwidth: Option<Arc<BandwidthLimiter>>,
     progress: Arc<AtomicU64>,
     segment: SegmentTask,
+    pool: BufferPool,
 ) -> Result<SegmentStats> {
     if segment.remaining_range().is_none() {
         return Ok(SegmentStats {
@@ -571,6 +601,7 @@ async fn download_segment_with_retry(
             bandwidth.clone(),
             progress.clone(),
             segment.clone(),
+            pool.clone(),
         )
         .await
         {
@@ -595,6 +626,7 @@ async fn download_segment_once(
     bandwidth: Option<Arc<BandwidthLimiter>>,
     progress: Arc<AtomicU64>,
     segment: SegmentTask,
+    pool: BufferPool,
 ) -> Result<SegmentStats> {
     let segment_state = partmap
         .segment(segment.id)
@@ -609,7 +641,7 @@ async fn download_segment_once(
         });
     }
 
-    let mut position = segment_state.start + segment_state.downloaded;
+    let position = segment_state.start + segment_state.downloaded;
     let end = segment_state.end;
 
     let mut builder = client.get(mirrors.next());
@@ -629,7 +661,7 @@ async fn download_segment_once(
 
     let mut downloaded = segment_state.downloaded;
     let mut total_downloaded = 0u64;
-    let mut write_buffer = Vec::with_capacity(WRITE_BUFFER_SIZE);
+    let mut write_buffer = pool.get();
     let mut buffer_position = position;
 
     let mut stream = response.bytes_stream();
@@ -639,24 +671,43 @@ async fn download_segment_once(
             limiter.consume(chunk.len()).await;
         }
 
-        // Buffer writes to reduce syscalls
         write_buffer.extend_from_slice(&chunk);
 
         if write_buffer.len() >= WRITE_BUFFER_SIZE {
-            write_all_at(&file, &write_buffer, buffer_position)?;
-            buffer_position += write_buffer.len() as u64;
-            write_buffer.clear();
+            let file_clone = file.clone();
+            let buf_to_write = write_buffer;
+            let pos_to_write = buffer_position;
+            let pool_clone = pool.clone();
+            let len = buf_to_write.len() as u64;
+            
+            tokio::task::spawn_blocking(move || {
+                let res = write_all_at(&file_clone, &buf_to_write, pos_to_write);
+                pool_clone.recycle(buf_to_write);
+                res
+            }).await??;
+            
+            buffer_position += len;
+            write_buffer = pool.get();
         }
 
-        position += chunk.len() as u64;
         downloaded += chunk.len() as u64;
         total_downloaded += chunk.len() as u64;
         progress.fetch_add(chunk.len() as u64, Ordering::Relaxed);
     }
 
-    // Flush remaining buffered data
     if !write_buffer.is_empty() {
-        write_all_at(&file, &write_buffer, buffer_position)?;
+        let file_clone = file.clone();
+        let buf_to_write = write_buffer;
+        let pos_to_write = buffer_position;
+        let pool_clone = pool.clone();
+        
+        tokio::task::spawn_blocking(move || {
+            let res = write_all_at(&file_clone, &buf_to_write, pos_to_write);
+            pool_clone.recycle(buf_to_write);
+            res
+        }).await??;
+    } else {
+        pool.recycle(write_buffer);
     }
 
     let completed = downloaded >= segment.len();

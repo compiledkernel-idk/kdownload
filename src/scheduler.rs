@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 #[derive(Debug, Clone)]
 pub struct SegmentTask {
@@ -89,8 +89,8 @@ impl Scheduler {
         }
     }
 
-    pub async fn next_segment(&self) -> Option<SegmentTask> {
-        let mut state = self.state.lock().await;
+    pub fn next_segment(&self) -> Option<SegmentTask> {
+        let mut state = self.state.lock().unwrap();
         if state.active >= state.target_parallelism {
             return None;
         }
@@ -102,8 +102,8 @@ impl Scheduler {
         }
     }
 
-    pub async fn on_segment_complete(&self, stats: SegmentStats) {
-        let mut state = self.state.lock().await;
+    pub fn on_segment_complete(&self, stats: SegmentStats) {
+        let mut state = self.state.lock().unwrap();
         if state.active > 0 {
             state.active -= 1;
         }
@@ -136,13 +136,13 @@ impl Scheduler {
         }
     }
 
-    pub async fn has_remaining(&self) -> bool {
-        let state = self.state.lock().await;
+    pub fn has_remaining(&self) -> bool {
+        let state = self.state.lock().unwrap();
         !state.pending.is_empty() || state.active > 0
     }
 
-    pub async fn snapshot(&self) -> SchedulerSnapshot {
-        let state = self.state.lock().await;
+    pub fn snapshot(&self) -> SchedulerSnapshot {
+        let state = self.state.lock().unwrap();
         SchedulerSnapshot {
             pending: state.pending.len(),
             active: state.active,
