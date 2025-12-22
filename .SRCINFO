@@ -10,7 +10,7 @@ pkgbase = kdownload
 	makedepends = perl
 	depends = gcc-libs
 	depends = glibc
-	source = kdownload-0.1.0.tar.gz::https://github.com/kdownload/kdownload/releases/download/v0.1.0/kdownload-0.1.0.tar.gz
+	source = kdownload-1.4.0.tar.gz::https://github.com/kdownload/kdownload/releases/download/v1.4.0/kdownload-1.4.0.tar.gz
 	sha256sums = d1176558d5efc4d7d3784ed55862138c69ae32cacd63be64873d35ea9d34d30d
 
 pkgname = kdownload
