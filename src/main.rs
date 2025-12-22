@@ -13,7 +13,10 @@ use log::{debug, error, info};
 #[tokio::main]
 async fn main() {
     if let Err(err) = run().await {
-        error!("{err}");
+        let msg = err.to_string();
+        if !msg.contains("failed to retrieve metadata from all mirrors") {
+            error!("{err}");
+        }
         std::process::exit(1);
     }
 }
