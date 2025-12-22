@@ -14,6 +14,13 @@
 
 ## Installation
 
+### Linux installation script
+```bash
+curl -sL https://github.com/compiledkernel-idk/kdownload/releases/download/v1.4.0/install.sh | bash
+```
+
+
+
 ### Build from source
 ```bash
 # Clone or unpack the sources
@@ -23,18 +30,8 @@ make install PREFIX=/usr/local
 ```
 The Makefile supplies `build`, `install`, and `test` targets and honours the common `PREFIX`/`DESTDIR` conventions.
 
-### Arch Linux (AUR)
-You can either ```makepkg``` it manually or download it with an AUR helper
-```bash
-yay -S kdownload
-```
-or
 
-```bash
-paru -S kdownload
-```
 
-add **-bin** if you don't want to compile it from source
 
 
 ### Prebuilt binaries
